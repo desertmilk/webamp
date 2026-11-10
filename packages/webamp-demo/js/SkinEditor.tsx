@@ -9,6 +9,10 @@ import {
   SkinImageAsset,
   WszDocument,
 } from "../../webamp/js/skinEditor";
+import {
+  describeBitmapAsset,
+  describeSpriteElement,
+} from "../../webamp/js/skinEditor/assetGuide";
 import { encodeBmp24 } from "../../webamp/js/skinEditor/raster";
 
 interface DecodedSheet {
@@ -175,6 +179,8 @@ function drawPlaylistContext(
   context.fillText("PLAYLIST WINDOW / SAMPLE LAYOUT", 20, 25);
   context.fillStyle = "#9aa59a";
   context.fillText("300 × 180 SKIN PIXELS", 411, 25);
+  const mutedAlpha = highlightedSprite ? 0.24 : 1;
+  context.globalAlpha = mutedAlpha;
 
   const drawScaled = (
     callback: (draw: (name: string, x: number, y: number) => void) => void
@@ -185,6 +191,11 @@ function drawPlaylistContext(
     callback((name, x, y) => {
       const sprite = spriteByName.get(name);
       if (!sprite) return;
+      const isHighlighted =
+        highlightedSprite != null &&
+        normalizedPlaylistSprite(name) ===
+          normalizedPlaylistSprite(highlightedSprite);
+      context.globalAlpha = isHighlighted ? 1 : mutedAlpha;
       context.drawImage(
         sheet,
         sprite.x,
@@ -196,6 +207,7 @@ function drawPlaylistContext(
         sprite.width,
         sprite.height
       );
+      context.globalAlpha = mutedAlpha;
       placements.push({
         name,
         x: originX + x * scale,
@@ -296,28 +308,6 @@ function drawPlaylistContext(
     }
     draw("PLAYLIST_SHADE_BACKGROUND_RIGHT", 225, 190);
   });
-
-  if (highlightedSprite) {
-    const targetName = normalizedPlaylistSprite(highlightedSprite);
-    for (const placement of placements) {
-      if (placement.name !== targetName) continue;
-      context.fillStyle = "rgb(210 246 107 / 30%)";
-      context.fillRect(
-        placement.x,
-        placement.y,
-        placement.width,
-        placement.height
-      );
-      context.strokeStyle = "#d2f66b";
-      context.lineWidth = 2;
-      context.strokeRect(
-        placement.x + 1,
-        placement.y + 1,
-        placement.width - 2,
-        placement.height - 2
-      );
-    }
-  }
 
   return placements;
 }
@@ -475,6 +465,8 @@ function ContextPreview({
     const scale = Math.min(500 / image.width, 292 / image.height);
     const x = (canvas.width - image.width * scale) / 2;
     const y = 48 + (292 - image.height * scale) / 2;
+    const mutedAlpha = highlightedSprite ? 0.24 : 1;
+    context.globalAlpha = mutedAlpha;
     context.drawImage(sheet, x, y, image.width * scale, image.height * scale);
     placementsRef.current = sprites.map((sprite) => ({
       name: sprite.name,
@@ -489,15 +481,20 @@ function ContextPreview({
     }));
     for (const placement of placementsRef.current) {
       if (placement.name !== highlightedSprite) continue;
-      context.strokeStyle = "#d2f66b";
-      context.lineWidth = 2;
-      context.strokeRect(
+      context.globalAlpha = 1;
+      context.drawImage(
+        sheet,
+        placement.sourceX,
+        placement.sourceY,
+        placement.sourceWidth,
+        placement.sourceHeight,
         placement.x,
         placement.y,
         placement.width,
         placement.height
       );
     }
+    context.globalAlpha = 1;
   }, [assetKey, highlightedSprite, image, sprites]);
 
   return (
@@ -568,6 +565,7 @@ export default function SkinEditor() {
   const [draggingArchive, setDraggingArchive] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewStatus, setPreviewStatus] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const archiveInput = useRef<HTMLInputElement>(null);
   const backgroundInput = useRef<HTMLInputElement>(null);
@@ -753,6 +751,11 @@ export default function SkinEditor() {
         return;
       }
       const key = event.key.toLowerCase();
+      if (key === "escape" && helpOpen) {
+        event.preventDefault();
+        setHelpOpen(false);
+        return;
+      }
       if (event.metaKey || event.ctrlKey) {
         if (key !== "z") return;
         event.preventDefault();
@@ -767,7 +770,10 @@ export default function SkinEditor() {
         e: "eraser",
         v: "position",
       };
-      if (tools[key] && (tools[key] !== "position" || background)) {
+      if (
+        tools[key] &&
+        (tools[key] !== "position" || (background && viewMode === "source"))
+      ) {
         event.preventDefault();
         setTool(tools[key]);
       } else if (key === "1") {
@@ -776,19 +782,20 @@ export default function SkinEditor() {
       } else if (key === "2" && currentImage) {
         event.preventDefault();
         setViewMode("live");
+        if (tool === "position") setTool("pencil");
       } else if (key === "+" || key === "=") {
         event.preventDefault();
         if (viewMode === "live") {
           setLiveZoom((value) => clamp(value + 0.25, 0.5, 2.5));
         } else {
-          setZoom((value) => clamp(value + 1, 2, 64));
+          setZoom((value) => clamp(value + 1, 2, 512));
         }
       } else if (key === "-" || key === "_") {
         event.preventDefault();
         if (viewMode === "live") {
           setLiveZoom((value) => clamp(value - 0.25, 0.5, 2.5));
         } else {
-          setZoom((value) => clamp(value - 1, 2, 64));
+          setZoom((value) => clamp(value - 1, 2, 512));
         }
       }
     }
@@ -809,13 +816,17 @@ export default function SkinEditor() {
         120,
         (stage?.clientHeight || window.innerHeight) - 48
       );
-      const fitScale = Math.floor(
-        Math.min(
-          (availableWidth * 0.6) / selectionRect.width,
-          (availableHeight * 0.6) / selectionRect.height
-        )
+      const widthScale = (availableWidth * 0.6) / selectionRect.width;
+      const heightScale = (availableHeight * 0.6) / selectionRect.height;
+      const largestDimension = Math.max(
+        selectionRect.width,
+        selectionRect.height
       );
-      setZoom(clamp(fitScale, 2, 64));
+      const fitScale =
+        largestDimension <= 64
+          ? Math.max(widthScale, heightScale)
+          : Math.min(widthScale, heightScale);
+      setZoom(clamp(Math.ceil(fitScale), 2, 512));
     }
 
     fitSourceZoom();
@@ -1289,9 +1300,13 @@ export default function SkinEditor() {
   const spriteLabel =
     (selectedSprite && displayElementName(selectedSprite.name)) ||
     "Whole bitmap";
-  const contextHighlight =
-    hoveredSpriteName ||
-    (selectedSpriteName === "sheet" ? null : selectedSpriteName);
+  const assetHelp = selectedAsset
+    ? describeBitmapAsset(selectedAsset.name)
+    : "Open a skin archive to inspect its bitmap assets.";
+  const elementHelp = selectedSprite
+    ? describeSpriteElement(selectedSprite.name)
+    : "The complete bitmap exactly as it is stored in the archive.";
+  const contextHighlight = hoveredSpriteName;
   const showContextPreview = viewMode === "live";
   const showSpriteCanvas = viewMode === "source" && selectionRect != null;
   const showWelcome = viewMode === "source" && selectionRect == null;
@@ -1493,9 +1508,9 @@ export default function SkinEditor() {
                 onClick={() =>
                   viewMode === "live"
                     ? setLiveZoom((value) => clamp(value + 0.25, 0.5, 2.5))
-                    : setZoom((value) => clamp(value + 1, 2, 64))
+                    : setZoom((value) => clamp(value + 1, 2, 512))
                 }
-                disabled={viewMode === "live" ? liveZoom >= 2.5 : zoom >= 64}
+                disabled={viewMode === "live" ? liveZoom >= 2.5 : zoom >= 512}
               >
                 +
               </button>
@@ -1615,7 +1630,18 @@ export default function SkinEditor() {
         </main>
 
         <aside className="skin-editor-properties">
-          <div className="skin-editor-panel-heading">Element</div>
+          <div className="skin-editor-panel-heading">
+            <span>Element</span>
+            <button
+              className="skin-editor-help-button"
+              type="button"
+              title="Asset guide"
+              aria-label="Asset guide"
+              onClick={() => setHelpOpen(true)}
+            >
+              ?
+            </button>
+          </div>
           <label className="skin-editor-property">
             <span>Bitmap</span>
             <select
@@ -1814,6 +1840,67 @@ export default function SkinEditor() {
           </div>
         </aside>
       </div>
+
+      {helpOpen && (
+        <div
+          className="skin-editor-help-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setHelpOpen(false);
+          }}
+        >
+          <section
+            className="skin-editor-help-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="skin-editor-help-title"
+          >
+            <header className="skin-editor-help-header">
+              <div>
+                <span>CLASSIC SKIN GUIDE</span>
+                <h2 id="skin-editor-help-title">Bitmap details</h2>
+              </div>
+              <button
+                className="skin-editor-preview-close"
+                aria-label="Close asset guide"
+                onClick={() => setHelpOpen(false)}
+              >
+                ×
+              </button>
+            </header>
+            <div className="skin-editor-help-content">
+              <section>
+                <span className="skin-editor-help-kicker">BITMAP</span>
+                <h3>{selectedAsset?.name || "No bitmap selected"}</h3>
+                <p>{assetHelp}</p>
+              </section>
+              <section>
+                <span className="skin-editor-help-kicker">ELEMENT</span>
+                <h3>{spriteLabel}</h3>
+                <p>{elementHelp}</p>
+              </section>
+              <section className="skin-editor-shortcut-guide">
+                <span className="skin-editor-help-kicker">KEYBOARD</span>
+                <div><kbd>B</kbd><span>Pencil</span></div>
+                <div><kbd>E</kbd><span>Eraser</span></div>
+                <div><kbd>V</kbd><span>Move / resize image</span></div>
+                <div><kbd>1</kbd><span>Source bitmap</span></div>
+                <div><kbd>2</kbd><span>Live layout</span></div>
+                <div><kbd>+</kbd><kbd>−</kbd><span>Zoom</span></div>
+                <div><kbd>Ctrl</kbd><kbd>Z</kbd><span>Undo</span></div>
+                <div><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Z</kbd><span>Redo</span></div>
+              </section>
+              <a
+                className="skin-editor-help-reference"
+                href="https://brittlewings.livejournal.com/5102.html"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Classic Winamp skinning tutorial
+              </a>
+            </div>
+          </section>
+        </div>
+      )}
 
       {previewUrl && (
         <div className="skin-editor-preview-overlay">

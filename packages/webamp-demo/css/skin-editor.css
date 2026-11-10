@@ -208,6 +208,24 @@ button {
   text-transform: uppercase;
 }
 
+.skin-editor-help-button {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border: 1px solid #cbd4c8;
+  border-radius: 50%;
+  background: #fff;
+  color: #536258;
+  cursor: pointer;
+  font: 11px var(--mono);
+}
+
+.skin-editor-help-button:hover {
+  border-color: var(--coral);
+  color: #9c4d3b;
+}
+
 .skin-editor-count {
   display: grid;
   width: 24px;
@@ -511,6 +529,11 @@ button {
   flex: none;
   image-rendering: pixelated;
   box-shadow: 0 8px 24px rgb(32 41 35 / 16%);
+}
+
+.skin-editor-context-canvas.tool-pencil,
+.skin-editor-context-canvas.tool-eraser {
+  cursor: crosshair;
 }
 
 .skin-editor-pixel-wrap {
@@ -1022,6 +1045,124 @@ button {
   border-top: 1px solid var(--panel-line);
   background: #f3f5ef;
   color: #77847a;
+}
+
+.skin-editor-help-overlay {
+  position: fixed;
+  z-index: 30;
+  display: grid;
+  padding: 22px;
+  background: rgb(18 27 21 / 72%);
+  inset: 0;
+  place-items: center;
+}
+
+.skin-editor-help-dialog {
+  display: grid;
+  width: min(520px, 100%);
+  max-height: min(720px, 100%);
+  grid-template-rows: 68px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #536057;
+  background: #f7f8f2;
+  box-shadow: 0 24px 70px rgb(0 0 0 / 35%);
+}
+
+.skin-editor-help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: var(--ink);
+  color: #f4f6ed;
+}
+
+.skin-editor-help-header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.skin-editor-help-header span {
+  color: #aab8ad;
+  font: 9px var(--mono);
+}
+
+.skin-editor-help-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.skin-editor-help-content {
+  display: grid;
+  gap: 15px;
+  overflow: auto;
+  padding: 18px;
+}
+
+.skin-editor-help-content section {
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e1e6de;
+}
+
+.skin-editor-help-kicker {
+  color: #77847a;
+  font: 9px var(--mono);
+}
+
+.skin-editor-help-content h3 {
+  margin: 5px 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.skin-editor-help-content p {
+  margin: 0;
+  color: #66746a;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.skin-editor-shortcut-guide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+.skin-editor-shortcut-guide > .skin-editor-help-kicker {
+  grid-column: 1 / -1;
+}
+
+.skin-editor-shortcut-guide > div {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #66746a;
+  font-size: 10px;
+}
+
+.skin-editor-shortcut-guide kbd {
+  min-width: 22px;
+  padding: 3px 5px;
+  border: 1px solid #cbd4c8;
+  border-bottom-width: 2px;
+  border-radius: 2px;
+  background: #fff;
+  color: #435149;
+  font: 9px var(--mono);
+  text-align: center;
+}
+
+.skin-editor-help-reference {
+  justify-self: start;
+  color: #477d9a;
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.skin-editor-help-reference:hover {
+  text-decoration: underline;
 }
 
 @media (max-width: 1020px) {

@@ -9,6 +9,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: "index.html",
+        player: "player.html",
         skinEditor: "skin-editor.html",
       },
     },
