@@ -122,6 +122,16 @@ function getBackgroundCrop(background: BackgroundLayer): SpriteRect {
 
 interface ContextPlacement extends SpriteRect {
   name: string;
+  sourceX: number;
+  sourceY: number;
+  sourceWidth: number;
+  sourceHeight: number;
+}
+
+interface ContextPixel {
+  name: string;
+  x: number;
+  y: number;
 }
 
 function normalizedPlaylistSprite(name: string): string {
@@ -133,6 +143,14 @@ function normalizedPlaylistSprite(name: string): string {
     PLAYLIST_SHADE_BACKGROUND_RIGHT_SELECTED: "PLAYLIST_SHADE_BACKGROUND_RIGHT",
   };
   return selectedPairs[name] || name.replace(/_SELECTED$/, "");
+}
+
+function displayElementName(name: string): string {
+  return name
+    .toLowerCase()
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 function drawPlaylistContext(
@@ -184,6 +202,10 @@ function drawPlaylistContext(
         y: originY + y * scale,
         width: sprite.width * scale,
         height: sprite.height * scale,
+        sourceX: sprite.x,
+        sourceY: sprite.y,
+        sourceWidth: sprite.width,
+        sourceHeight: sprite.height,
       });
     });
     context.restore();
@@ -296,6 +318,8 @@ function drawPlaylistContext(
       );
     }
   }
+
+  return placements;
 }
 
 function SpriteThumbnail({
@@ -333,13 +357,87 @@ function ContextPreview({
   sprites,
   assetKey,
   highlightedSprite,
+  tool,
+  onHoverSprite,
+  onPaintStart,
+  onPaintMove,
+  onPaintEnd,
 }: {
   image: DecodedSheet;
   sprites: Sprite[];
   assetKey: string;
   highlightedSprite: string | null;
+  tool: Tool;
+  onHoverSprite: (name: string | null) => void;
+  onPaintStart: (pixel: ContextPixel) => void;
+  onPaintMove: (pixel: ContextPixel) => void;
+  onPaintEnd: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const placementsRef = useRef<ContextPlacement[]>([]);
+  const pointerDown = useRef(false);
+
+  function getContextPixel(
+    event: React.PointerEvent<HTMLCanvasElement>
+  ): ContextPixel | null {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const bounds = canvas.getBoundingClientRect();
+    const x = ((event.clientX - bounds.left) / bounds.width) * canvas.width;
+    const y = ((event.clientY - bounds.top) / bounds.height) * canvas.height;
+    const placement = [...placementsRef.current]
+      .reverse()
+      .find(
+        (item) =>
+          x >= item.x &&
+          x < item.x + item.width &&
+          y >= item.y &&
+          y < item.y + item.height
+      );
+    if (!placement) return null;
+    return {
+      name: placement.name,
+      x:
+        placement.sourceX +
+        Math.floor(
+          ((x - placement.x) / placement.width) * placement.sourceWidth
+        ),
+      y:
+        placement.sourceY +
+        Math.floor(
+          ((y - placement.y) / placement.height) * placement.sourceHeight
+        ),
+    };
+  }
+
+  function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
+    const pixel = getContextPixel(event);
+    if (!pixel || tool === "position") return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointerDown.current = true;
+    onHoverSprite(pixel.name);
+    onPaintStart(pixel);
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+    const pixel = getContextPixel(event);
+    if (pointerDown.current) {
+      if (pixel) {
+        onHoverSprite(pixel.name);
+        onPaintMove(pixel);
+      } else {
+        pointerDown.current = false;
+        onPaintEnd();
+      }
+    } else {
+      onHoverSprite(pixel?.name || null);
+    }
+  }
+
+  function handlePointerUp() {
+    pointerDown.current = false;
+    onPaintEnd();
+  }
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -357,7 +455,12 @@ function ContextPreview({
     sheetContext.putImageData(image.pixels, 0, 0);
 
     if (assetKey === "PLEDIT") {
-      drawPlaylistContext(context, sheet, sprites, highlightedSprite);
+      placementsRef.current = drawPlaylistContext(
+        context,
+        sheet,
+        sprites,
+        highlightedSprite
+      );
       return;
     }
 
@@ -370,15 +473,26 @@ function ContextPreview({
     const x = (canvas.width - image.width * scale) / 2;
     const y = 48 + (292 - image.height * scale) / 2;
     context.drawImage(sheet, x, y, image.width * scale, image.height * scale);
-    const sprite = sprites.find((item) => item.name === highlightedSprite);
-    if (sprite) {
+    placementsRef.current = sprites.map((sprite) => ({
+      name: sprite.name,
+      x: x + sprite.x * scale,
+      y: y + sprite.y * scale,
+      width: sprite.width * scale,
+      height: sprite.height * scale,
+      sourceX: sprite.x,
+      sourceY: sprite.y,
+      sourceWidth: sprite.width,
+      sourceHeight: sprite.height,
+    }));
+    for (const placement of placementsRef.current) {
+      if (placement.name !== highlightedSprite) continue;
       context.strokeStyle = "#d2f66b";
       context.lineWidth = 2;
       context.strokeRect(
-        x + sprite.x * scale,
-        y + sprite.y * scale,
-        sprite.width * scale,
-        sprite.height * scale
+        placement.x,
+        placement.y,
+        placement.width,
+        placement.height
       );
     }
   }, [assetKey, highlightedSprite, image, sprites]);
@@ -386,12 +500,17 @@ function ContextPreview({
   return (
     <canvas
       ref={canvasRef}
-      className="skin-editor-context-canvas"
+      className={`skin-editor-context-canvas tool-${tool}`}
       aria-label={
         assetKey === "PLEDIT"
           ? "Playlist window preview with highlighted sprite"
           : "Bitmap atlas preview with highlighted sprite"
       }
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onLostPointerCapture={handlePointerUp}
     />
   );
 }
@@ -427,7 +546,7 @@ export default function SkinEditor() {
   const [hoveredSpriteName, setHoveredSpriteName] = useState<string | null>(
     null
   );
-  const [viewMode, setViewMode] = useState<"sprite" | "context">("sprite");
+  const [viewMode, setViewMode] = useState<"source" | "live">("source");
   const [currentImage, setCurrentImage] = useState<DecodedSheet | null>(null);
   const [editedImages, setEditedImages] = useState(createEmptyMap);
   const [background, setBackground] = useState<BackgroundLayer | null>(null);
@@ -452,6 +571,7 @@ export default function SkinEditor() {
   const redoStack = useRef<DecodedSheet[]>([]);
   const pointerDown = useRef(false);
   const previousPixel = useRef<{ x: number; y: number } | null>(null);
+  const previousContextPixel = useRef<ContextPixel | null>(null);
   const backgroundDragOffset = useRef<{ x: number; y: number } | null>(null);
   const backgroundDragMode = useRef<"move" | "resize" | null>(null);
 
@@ -675,7 +795,7 @@ export default function SkinEditor() {
       setSelectedAssetId(loaded.project.assets[0].id);
       setSelectedSpriteName("sheet");
       setHoveredSpriteName(null);
-      setViewMode("sprite");
+      setViewMode("source");
       setBackground(null);
       setTool("pencil");
       resetHistory();
@@ -740,10 +860,11 @@ export default function SkinEditor() {
 
   function paintLine(
     from: { x: number; y: number },
-    to: { x: number; y: number }
+    to: { x: number; y: number },
+    rect: SpriteRect | null = selectionRect
   ) {
     const image = currentImageRef.current;
-    if (!image || !selectionRect) return;
+    if (!image || !rect) return;
     const nextPixels = image.pixels;
     let x = from.x;
     let y = from.y;
@@ -754,8 +875,7 @@ export default function SkinEditor() {
     let errorValue = dx + dy;
 
     while (true) {
-      const target =
-        ((selectionRect.y + y) * image.width + selectionRect.x + x) * 4;
+      const target = ((rect.y + y) * image.width + rect.x + x) * 4;
       const hex = tool === "eraser" ? eraseColor : color;
       nextPixels.data[target] = parseInt(hex.slice(1, 3), 16);
       nextPixels.data[target + 1] = parseInt(hex.slice(3, 5), 16);
@@ -774,6 +894,45 @@ export default function SkinEditor() {
     }
 
     commitImage({ ...image, pixels: nextPixels });
+  }
+
+  function onContextPaintStart(pixel: ContextPixel) {
+    const image = currentImageRef.current;
+    if (!image || tool === "position") return;
+    setSelectedSpriteName(pixel.name);
+    setBackground(null);
+    pushHistory(undoStack.current, {
+      ...image,
+      pixels: copyImageData(image.pixels),
+    });
+    redoStack.current = [];
+    previousContextPixel.current = pixel;
+    paintLine(pixel, pixel, {
+      x: 0,
+      y: 0,
+      width: image.width,
+      height: image.height,
+    });
+  }
+
+  function onContextPaintMove(pixel: ContextPixel) {
+    const image = currentImageRef.current;
+    const previous = previousContextPixel.current;
+    if (!image || !previous) return;
+    const sheetRect = {
+      x: 0,
+      y: 0,
+      width: image.width,
+      height: image.height,
+    };
+    if (previous.name === pixel.name) {
+      paintLine(previous, pixel, sheetRect);
+    }
+    previousContextPixel.current = pixel;
+  }
+
+  function onContextPaintEnd() {
+    previousContextPixel.current = null;
   }
 
   function onCanvasPointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
@@ -1044,13 +1203,14 @@ export default function SkinEditor() {
   }
 
   const spriteLabel =
-    selectedSprite?.name.replaceAll("_", " ") || "Whole bitmap";
+    (selectedSprite && displayElementName(selectedSprite.name)) ||
+    "Whole bitmap";
   const contextHighlight =
     hoveredSpriteName ||
     (selectedSpriteName === "sheet" ? null : selectedSpriteName);
-  const showContextPreview = viewMode === "context";
-  const showSpriteCanvas = viewMode === "sprite" && selectionRect != null;
-  const showWelcome = viewMode === "sprite" && selectionRect == null;
+  const showContextPreview = viewMode === "live";
+  const showSpriteCanvas = viewMode === "source" && selectionRect != null;
+  const showWelcome = viewMode === "source" && selectionRect == null;
 
   return (
     <div
@@ -1186,7 +1346,7 @@ export default function SkinEditor() {
                 className={tool === "pencil" ? "is-active" : ""}
                 title="Pencil"
                 onClick={() => setTool("pencil")}
-                disabled={!currentImage || viewMode !== "sprite"}
+                disabled={!currentImage}
               >
                 Pencil
               </button>
@@ -1194,7 +1354,7 @@ export default function SkinEditor() {
                 className={tool === "eraser" ? "is-active" : ""}
                 title="Erase with the background color"
                 onClick={() => setTool("eraser")}
-                disabled={!currentImage || viewMode !== "sprite"}
+                disabled={!currentImage}
               >
                 Eraser
               </button>
@@ -1202,24 +1362,24 @@ export default function SkinEditor() {
                 className={tool === "position" ? "is-active" : ""}
                 title="Move the imported background image"
                 onClick={() => setTool("position")}
-                disabled={!background || viewMode !== "sprite"}
+                disabled={!background || viewMode !== "source"}
               >
                 Position
               </button>
             </div>
             <div className="skin-editor-view-modes" aria-label="Canvas view">
               <button
-                className={viewMode === "sprite" ? "is-active" : ""}
-                onClick={() => setViewMode("sprite")}
+                className={viewMode === "source" ? "is-active" : ""}
+                onClick={() => setViewMode("source")}
               >
-                Sprite
+                Source
               </button>
               <button
-                className={viewMode === "context" ? "is-active" : ""}
-                onClick={() => setViewMode("context")}
+                className={viewMode === "live" ? "is-active" : ""}
+                onClick={() => setViewMode("live")}
                 disabled={!currentImage}
               >
-                Context
+                Live
               </button>
             </div>
             <div className="skin-editor-color-tools">
@@ -1228,7 +1388,7 @@ export default function SkinEditor() {
                 <input
                   type="color"
                   value={color}
-                  disabled={viewMode !== "sprite"}
+                  disabled={tool === "position"}
                   onChange={(event) => setColor(event.currentTarget.value)}
                 />
               </label>
@@ -1237,7 +1397,7 @@ export default function SkinEditor() {
                 <input
                   type="color"
                   value={eraseColor}
-                  disabled={viewMode !== "sprite"}
+                  disabled={tool === "position"}
                   onChange={(event) => setEraseColor(event.currentTarget.value)}
                 />
               </label>
@@ -1246,7 +1406,7 @@ export default function SkinEditor() {
               <button
                 aria-label="Zoom out"
                 onClick={() => setZoom((value) => Math.max(1, value - 1))}
-                disabled={zoom <= 1 || viewMode !== "sprite"}
+                disabled={zoom <= 1 || viewMode !== "source"}
               >
                 −
               </button>
@@ -1254,7 +1414,7 @@ export default function SkinEditor() {
               <button
                 aria-label="Zoom in"
                 onClick={() => setZoom((value) => Math.min(16, value + 1))}
-                disabled={zoom >= 16 || viewMode !== "sprite"}
+                disabled={zoom >= 16 || viewMode !== "source"}
               >
                 +
               </button>
@@ -1291,7 +1451,7 @@ export default function SkinEditor() {
                   </strong>
                   <span>
                     {contextHighlight
-                      ? contextHighlight.replaceAll("_", " ")
+                      ? displayElementName(contextHighlight)
                       : "Hover an element to locate it"}
                   </span>
                 </div>
@@ -1300,6 +1460,11 @@ export default function SkinEditor() {
                   sprites={availableSprites}
                   assetKey={spriteKey(selectedAsset)}
                   highlightedSprite={contextHighlight}
+                  tool={tool}
+                  onHoverSprite={setHoveredSpriteName}
+                  onPaintStart={onContextPaintStart}
+                  onPaintMove={onContextPaintMove}
+                  onPaintEnd={onContextPaintEnd}
                 />
               </div>
             )}
@@ -1429,7 +1594,7 @@ export default function SkinEditor() {
                     <SpriteThumbnail image={currentImage} sprite={sprite} />
                   )}
                   <span className="skin-editor-sprite-row-name">
-                    {sprite.name.replaceAll("_", " ")}
+                    {displayElementName(sprite.name)}
                   </span>
                   <span className="skin-editor-sprite-row-size">
                     {sprite.width}×{sprite.height}
