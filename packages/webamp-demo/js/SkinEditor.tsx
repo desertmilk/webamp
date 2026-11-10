@@ -120,6 +120,282 @@ function getBackgroundCrop(background: BackgroundLayer): SpriteRect {
   };
 }
 
+interface ContextPlacement extends SpriteRect {
+  name: string;
+}
+
+function normalizedPlaylistSprite(name: string): string {
+  const selectedPairs: Record<string, string> = {
+    PLAYLIST_TOP_LEFT_SELECTED: "PLAYLIST_TOP_LEFT_CORNER",
+    PLAYLIST_TITLE_BAR_SELECTED: "PLAYLIST_TITLE_BAR",
+    PLAYLIST_TOP_RIGHT_SELECTED: "PLAYLIST_TOP_RIGHT_CORNER",
+    PLAYLIST_TOP_TILE_SELECTED: "PLAYLIST_TOP_TILE",
+    PLAYLIST_SHADE_BACKGROUND_RIGHT_SELECTED: "PLAYLIST_SHADE_BACKGROUND_RIGHT",
+  };
+  return selectedPairs[name] || name.replace(/_SELECTED$/, "");
+}
+
+function drawPlaylistContext(
+  context: CanvasRenderingContext2D,
+  sheet: HTMLCanvasElement,
+  sprites: Sprite[],
+  highlightedSprite: string | null
+) {
+  const width = 560;
+  const height = 360;
+  const scale = 1.35;
+  const originX = 77.5;
+  const originY = 48;
+  const spriteByName = new Map(sprites.map((sprite) => [sprite.name, sprite]));
+  const placements: ContextPlacement[] = [];
+
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "#f2f4ee";
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = "#6e7c72";
+  context.font = "10px 'DM Mono', monospace";
+  context.fillText("PLAYLIST WINDOW / SAMPLE LAYOUT", 20, 25);
+  context.fillStyle = "#9aa59a";
+  context.fillText("300 × 180 SKIN PIXELS", 411, 25);
+
+  const drawScaled = (
+    callback: (draw: (name: string, x: number, y: number) => void) => void
+  ) => {
+    context.save();
+    context.translate(originX, originY);
+    context.scale(scale, scale);
+    callback((name, x, y) => {
+      const sprite = spriteByName.get(name);
+      if (!sprite) return;
+      context.drawImage(
+        sheet,
+        sprite.x,
+        sprite.y,
+        sprite.width,
+        sprite.height,
+        x,
+        y,
+        sprite.width,
+        sprite.height
+      );
+      placements.push({
+        name,
+        x: originX + x * scale,
+        y: originY + y * scale,
+        width: sprite.width * scale,
+        height: sprite.height * scale,
+      });
+    });
+    context.restore();
+  };
+
+  drawScaled((draw) => {
+    context.fillStyle = "#141a16";
+    context.fillRect(0, 0, 300, 180);
+
+    draw("PLAYLIST_TOP_LEFT_CORNER", 0, 0);
+    draw("PLAYLIST_TITLE_BAR", 25, 0);
+    for (let x = 125; x < 275; x += 25) draw("PLAYLIST_TOP_TILE", x, 0);
+    draw("PLAYLIST_TOP_RIGHT_CORNER", 275, 0);
+
+    context.fillStyle = "#080c09";
+    context.fillRect(12, 20, 268, 80);
+    context.save();
+    context.beginPath();
+    context.rect(0, 20, 300, 80);
+    context.clip();
+    for (let y = 20; y < 100; y += 29) {
+      draw("PLAYLIST_LEFT_TILE", 0, y);
+      draw("PLAYLIST_RIGHT_TILE", 280, y);
+    }
+    context.restore();
+
+    context.fillStyle = "#28485a";
+    context.fillRect(13, 43, 164, 18);
+    context.font = "8px 'DM Mono', monospace";
+    context.fillStyle = "#d2f66b";
+    context.fillText("01", 19, 35);
+    context.fillStyle = "#e8eee4";
+    context.fillText("Satellite Anthem", 37, 35);
+    context.fillStyle = "#c2d0c4";
+    context.fillText("02", 19, 57);
+    context.fillText("Midnight Circuit", 37, 57);
+    context.fillStyle = "#a7b3a8";
+    context.fillText("03", 19, 75);
+    context.fillText("Soft Focus", 37, 75);
+    context.fillText("04", 19, 93);
+    context.fillText("Static in Bloom", 37, 93);
+
+    draw("PLAYLIST_VISUALIZER_BACKGROUND", 180, 20);
+    context.fillStyle = "#d2f66b";
+    [6, 13, 9, 17, 11, 19, 8, 14, 5].forEach((bar, index) => {
+      context.fillRect(185 + index * 7, 51 - bar, 3, bar);
+    });
+    draw("PLAYLIST_SCROLL_HANDLE", 263, 47);
+
+    const firstRow = [
+      "PLAYLIST_ADD_URL",
+      "PLAYLIST_ADD_DIR",
+      "PLAYLIST_ADD_FILE",
+      "PLAYLIST_REMOVE_ALL",
+      "PLAYLIST_CROP",
+      "PLAYLIST_REMOVE_SELECTED",
+    ];
+    const secondRow = [
+      "PLAYLIST_REMOVE_MISC",
+      "PLAYLIST_INVERT_SELECTION",
+      "PLAYLIST_SELECT_ZERO",
+      "PLAYLIST_SELECT_ALL",
+      "PLAYLIST_SORT_LIST",
+      "PLAYLIST_FILE_INFO",
+      "PLAYLIST_MISC_OPTIONS",
+      "PLAYLIST_NEW_LIST",
+      "PLAYLIST_SAVE_LIST",
+      "PLAYLIST_LOAD_LIST",
+    ];
+    firstRow.forEach((name, index) => draw(name, 10 + index * 42, 102));
+    secondRow.forEach((name, index) => draw(name, 8 + index * 26, 122));
+
+    draw("PLAYLIST_BOTTOM_LEFT_CORNER", 0, 142);
+    draw("PLAYLIST_BOTTOM_TILE", 125, 142);
+    draw("PLAYLIST_BOTTOM_RIGHT_CORNER", 150, 142);
+    draw("PLAYLIST_CLOSE_SELECTED", 52, 5);
+    draw("PLAYLIST_COLLAPSE_SELECTED", 62, 5);
+    draw("PLAYLIST_EXPAND_SELECTED", 150, 5);
+  });
+
+  drawScaled((draw) => {
+    context.fillStyle = "#6e7c72";
+    context.font = "7px 'DM Mono', monospace";
+    context.fillText("WINAMP SHADE", 0, 187);
+    draw("PLAYLIST_SHADE_BACKGROUND_LEFT", 0, 190);
+    for (let x = 25; x < 225; x += 25) {
+      draw("PLAYLIST_SHADE_BACKGROUND", x, 190);
+    }
+    draw("PLAYLIST_SHADE_BACKGROUND_RIGHT", 225, 190);
+  });
+
+  if (highlightedSprite) {
+    const targetName = normalizedPlaylistSprite(highlightedSprite);
+    for (const placement of placements) {
+      if (placement.name !== targetName) continue;
+      context.fillStyle = "rgb(210 246 107 / 30%)";
+      context.fillRect(
+        placement.x,
+        placement.y,
+        placement.width,
+        placement.height
+      );
+      context.strokeStyle = "#d2f66b";
+      context.lineWidth = 2;
+      context.strokeRect(
+        placement.x + 1,
+        placement.y + 1,
+        placement.width - 2,
+        placement.height - 2
+      );
+    }
+  }
+}
+
+function SpriteThumbnail({
+  image,
+  sprite,
+}: {
+  image: DecodedSheet;
+  sprite: Sprite;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const scale = Math.min(42 / sprite.width, 26 / sprite.height);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    canvas.width = sprite.width;
+    canvas.height = sprite.height;
+    context.putImageData(cropImageData(image.pixels, sprite), 0, 0);
+  }, [image, sprite]);
+
+  return (
+    <span className="skin-editor-sprite-thumb-wrap">
+      <canvas
+        ref={canvasRef}
+        className="skin-editor-sprite-thumb"
+        style={{ width: sprite.width * scale, height: sprite.height * scale }}
+      />
+    </span>
+  );
+}
+
+function ContextPreview({
+  image,
+  sprites,
+  assetKey,
+  highlightedSprite,
+}: {
+  image: DecodedSheet;
+  sprites: Sprite[];
+  assetKey: string;
+  highlightedSprite: string | null;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    canvas.width = 560;
+    canvas.height = 360;
+    context.imageSmoothingEnabled = false;
+
+    const sheet = window.document.createElement("canvas");
+    sheet.width = image.width;
+    sheet.height = image.height;
+    const sheetContext = sheet.getContext("2d");
+    if (!sheetContext) return;
+    sheetContext.putImageData(image.pixels, 0, 0);
+
+    if (assetKey === "PLEDIT") {
+      drawPlaylistContext(context, sheet, sprites, highlightedSprite);
+      return;
+    }
+
+    context.fillStyle = "#f2f4ee";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#6e7c72";
+    context.font = "10px 'DM Mono', monospace";
+    context.fillText("BITMAP / SPRITE ATLAS", 20, 25);
+    const scale = Math.min(500 / image.width, 292 / image.height);
+    const x = (canvas.width - image.width * scale) / 2;
+    const y = 48 + (292 - image.height * scale) / 2;
+    context.drawImage(sheet, x, y, image.width * scale, image.height * scale);
+    const sprite = sprites.find((item) => item.name === highlightedSprite);
+    if (sprite) {
+      context.strokeStyle = "#d2f66b";
+      context.lineWidth = 2;
+      context.strokeRect(
+        x + sprite.x * scale,
+        y + sprite.y * scale,
+        sprite.width * scale,
+        sprite.height * scale
+      );
+    }
+  }, [assetKey, highlightedSprite, image, sprites]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="skin-editor-context-canvas"
+      aria-label={
+        assetKey === "PLEDIT"
+          ? "Playlist window preview with highlighted sprite"
+          : "Bitmap atlas preview with highlighted sprite"
+      }
+    />
+  );
+}
+
 function NumberField({
   label,
   value,
@@ -148,6 +424,10 @@ export default function SkinEditor() {
   const [document, setDocument] = useState<WszDocument | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState("");
   const [selectedSpriteName, setSelectedSpriteName] = useState("sheet");
+  const [hoveredSpriteName, setHoveredSpriteName] = useState<string | null>(
+    null
+  );
+  const [viewMode, setViewMode] = useState<"sprite" | "context">("sprite");
   const [currentImage, setCurrentImage] = useState<DecodedSheet | null>(null);
   const [editedImages, setEditedImages] = useState(createEmptyMap);
   const [background, setBackground] = useState<BackgroundLayer | null>(null);
@@ -394,6 +674,8 @@ export default function SkinEditor() {
       setPreviewUrl(null);
       setSelectedAssetId(loaded.project.assets[0].id);
       setSelectedSpriteName("sheet");
+      setHoveredSpriteName(null);
+      setViewMode("sprite");
       setBackground(null);
       setTool("pencil");
       resetHistory();
@@ -763,6 +1045,12 @@ export default function SkinEditor() {
 
   const spriteLabel =
     selectedSprite?.name.replaceAll("_", " ") || "Whole bitmap";
+  const contextHighlight =
+    hoveredSpriteName ||
+    (selectedSpriteName === "sheet" ? null : selectedSpriteName);
+  const showContextPreview = viewMode === "context";
+  const showSpriteCanvas = viewMode === "sprite" && selectionRect != null;
+  const showWelcome = viewMode === "sprite" && selectionRect == null;
 
   return (
     <div
@@ -898,7 +1186,7 @@ export default function SkinEditor() {
                 className={tool === "pencil" ? "is-active" : ""}
                 title="Pencil"
                 onClick={() => setTool("pencil")}
-                disabled={!currentImage}
+                disabled={!currentImage || viewMode !== "sprite"}
               >
                 Pencil
               </button>
@@ -906,7 +1194,7 @@ export default function SkinEditor() {
                 className={tool === "eraser" ? "is-active" : ""}
                 title="Erase with the background color"
                 onClick={() => setTool("eraser")}
-                disabled={!currentImage}
+                disabled={!currentImage || viewMode !== "sprite"}
               >
                 Eraser
               </button>
@@ -914,9 +1202,24 @@ export default function SkinEditor() {
                 className={tool === "position" ? "is-active" : ""}
                 title="Move the imported background image"
                 onClick={() => setTool("position")}
-                disabled={!background}
+                disabled={!background || viewMode !== "sprite"}
               >
                 Position
+              </button>
+            </div>
+            <div className="skin-editor-view-modes" aria-label="Canvas view">
+              <button
+                className={viewMode === "sprite" ? "is-active" : ""}
+                onClick={() => setViewMode("sprite")}
+              >
+                Sprite
+              </button>
+              <button
+                className={viewMode === "context" ? "is-active" : ""}
+                onClick={() => setViewMode("context")}
+                disabled={!currentImage}
+              >
+                Context
               </button>
             </div>
             <div className="skin-editor-color-tools">
@@ -925,6 +1228,7 @@ export default function SkinEditor() {
                 <input
                   type="color"
                   value={color}
+                  disabled={viewMode !== "sprite"}
                   onChange={(event) => setColor(event.currentTarget.value)}
                 />
               </label>
@@ -933,6 +1237,7 @@ export default function SkinEditor() {
                 <input
                   type="color"
                   value={eraseColor}
+                  disabled={viewMode !== "sprite"}
                   onChange={(event) => setEraseColor(event.currentTarget.value)}
                 />
               </label>
@@ -941,7 +1246,7 @@ export default function SkinEditor() {
               <button
                 aria-label="Zoom out"
                 onClick={() => setZoom((value) => Math.max(1, value - 1))}
-                disabled={zoom <= 1}
+                disabled={zoom <= 1 || viewMode !== "sprite"}
               >
                 −
               </button>
@@ -949,7 +1254,7 @@ export default function SkinEditor() {
               <button
                 aria-label="Zoom in"
                 onClick={() => setZoom((value) => Math.min(16, value + 1))}
-                disabled={zoom >= 16}
+                disabled={zoom >= 16 || viewMode !== "sprite"}
               >
                 +
               </button>
@@ -976,7 +1281,29 @@ export default function SkinEditor() {
 
           <div className="skin-editor-stage-wrap">
             {error && <div className="skin-editor-error">{error}</div>}
-            {selectionRect ? (
+            {showContextPreview && currentImage && selectedAsset && (
+              <div className="skin-editor-context-scroll">
+                <div className="skin-editor-context-heading">
+                  <strong>
+                    {spriteKey(selectedAsset) === "PLEDIT"
+                      ? "Playlist window"
+                      : "Bitmap context"}
+                  </strong>
+                  <span>
+                    {contextHighlight
+                      ? contextHighlight.replaceAll("_", " ")
+                      : "Hover an element to locate it"}
+                  </span>
+                </div>
+                <ContextPreview
+                  image={currentImage}
+                  sprites={availableSprites}
+                  assetKey={spriteKey(selectedAsset)}
+                  highlightedSprite={contextHighlight}
+                />
+              </div>
+            )}
+            {showSpriteCanvas && selectionRect && (
               <div className="skin-editor-stage-scroll">
                 <div
                   className="skin-editor-pixel-wrap"
@@ -1003,7 +1330,8 @@ export default function SkinEditor() {
                   />
                 </div>
               </div>
-            ) : (
+            )}
+            {showWelcome && (
               <div className="skin-editor-welcome">
                 <div className="skin-editor-welcome-index">
                   01 / CLASSIC SKINS
@@ -1054,25 +1382,62 @@ export default function SkinEditor() {
               ))}
             </select>
           </label>
-          <label className="skin-editor-property">
-            <span>Sprite</span>
-            <select
-              value={selectedSpriteName}
-              onChange={(event) => {
-                setSelectedSpriteName(event.currentTarget.value);
+          <div className="skin-editor-sprite-inventory">
+            <div className="skin-editor-sprite-inventory-heading">
+              <span>Elements</span>
+              <span>{availableSprites.length}</span>
+            </div>
+            <button
+              className={`skin-editor-sprite-row ${
+                selectedSpriteName === "sheet" ? "is-selected" : ""
+              }`}
+              onMouseEnter={() => setHoveredSpriteName(null)}
+              onFocus={() => setHoveredSpriteName(null)}
+              onClick={() => {
+                setSelectedSpriteName("sheet");
                 setBackground(null);
                 resetHistory();
               }}
-              disabled={!selectedAsset || availableSprites.length === 0}
             >
-              <option value="sheet">Whole bitmap</option>
+              <span className="skin-editor-sprite-sheet-icon">▦</span>
+              <span className="skin-editor-sprite-row-name">Whole bitmap</span>
+              <span className="skin-editor-sprite-row-size">
+                {currentImage
+                  ? `${currentImage.width}×${currentImage.height}`
+                  : "—"}
+              </span>
+            </button>
+            <div
+              className="skin-editor-sprite-list"
+              onMouseLeave={() => setHoveredSpriteName(null)}
+            >
               {availableSprites.map((sprite) => (
-                <option key={sprite.name} value={sprite.name}>
-                  {sprite.name.replaceAll("_", " ")}
-                </option>
+                <button
+                  key={sprite.name}
+                  className={`skin-editor-sprite-row ${
+                    selectedSpriteName === sprite.name ? "is-selected" : ""
+                  }`}
+                  onMouseEnter={() => setHoveredSpriteName(sprite.name)}
+                  onFocus={() => setHoveredSpriteName(sprite.name)}
+                  onClick={() => {
+                    setSelectedSpriteName(sprite.name);
+                    setBackground(null);
+                    resetHistory();
+                  }}
+                >
+                  {currentImage && (
+                    <SpriteThumbnail image={currentImage} sprite={sprite} />
+                  )}
+                  <span className="skin-editor-sprite-row-name">
+                    {sprite.name.replaceAll("_", " ")}
+                  </span>
+                  <span className="skin-editor-sprite-row-size">
+                    {sprite.width}×{sprite.height}
+                  </span>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          </div>
           <div className="skin-editor-size-readout">
             <span>Canvas size</span>
             <strong>
