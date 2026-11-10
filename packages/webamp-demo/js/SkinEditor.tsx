@@ -358,6 +358,7 @@ function ContextPreview({
   assetKey,
   highlightedSprite,
   tool,
+  zoom,
   onHoverSprite,
   onPaintStart,
   onPaintMove,
@@ -368,8 +369,9 @@ function ContextPreview({
   assetKey: string;
   highlightedSprite: string | null;
   tool: Tool;
+  zoom: number;
   onHoverSprite: (name: string | null) => void;
-  onPaintStart: (pixel: ContextPixel) => void;
+  onPaintStart: (pixel: ContextPixel, button: number) => void;
   onPaintMove: (pixel: ContextPixel) => void;
   onPaintEnd: () => void;
 }) {
@@ -413,10 +415,11 @@ function ContextPreview({
   function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
     const pixel = getContextPixel(event);
     if (!pixel || tool === "position") return;
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerDown.current = true;
     onHoverSprite(pixel.name);
-    onPaintStart(pixel);
+    onPaintStart(pixel, event.button);
   }
 
   function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
@@ -511,6 +514,11 @@ function ContextPreview({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       onLostPointerCapture={handlePointerUp}
+      onContextMenu={(event) => event.preventDefault()}
+      style={{
+        width: 560 * zoom,
+        height: 360 * zoom,
+      }}
     />
   );
 }
@@ -552,6 +560,7 @@ export default function SkinEditor() {
   const [background, setBackground] = useState<BackgroundLayer | null>(null);
   const [tool, setTool] = useState<Tool>("pencil");
   const [zoom, setZoom] = useState(5);
+  const [liveZoom, setLiveZoom] = useState(1);
   const [color, setColor] = useState("#f0f2df");
   const [eraseColor, setEraseColor] = useState("#202923");
   const [error, setError] = useState("");
@@ -563,6 +572,7 @@ export default function SkinEditor() {
   const archiveInput = useRef<HTMLInputElement>(null);
   const backgroundInput = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stageWrapRef = useRef<HTMLDivElement>(null);
   const previewHostRef = useRef<HTMLDivElement>(null);
   const originalImages = useRef(createEmptyMap());
   const editedImagesRef = useRef(createEmptyMap());
@@ -574,6 +584,7 @@ export default function SkinEditor() {
   const previousContextPixel = useRef<ContextPixel | null>(null);
   const backgroundDragOffset = useRef<{ x: number; y: number } | null>(null);
   const backgroundDragMode = useRef<"move" | "resize" | null>(null);
+  const activePaintColor = useRef(color);
 
   const selectedAsset = document?.project.assets.find(
     (asset) => asset.id === selectedAssetId
@@ -741,20 +752,82 @@ export default function SkinEditor() {
       ) {
         return;
       }
-      if (
-        !(event.metaKey || event.ctrlKey) ||
-        event.key.toLowerCase() !== "z"
-      ) {
+      const key = event.key.toLowerCase();
+      if (event.metaKey || event.ctrlKey) {
+        if (key !== "z") return;
+        event.preventDefault();
+        if (event.shiftKey) redo();
+        else undo();
         return;
       }
-      event.preventDefault();
-      if (event.shiftKey) redo();
-      else undo();
+      if (event.altKey) return;
+
+      const tools: Record<string, Tool> = {
+        b: "pencil",
+        e: "eraser",
+        v: "position",
+      };
+      if (tools[key] && (tools[key] !== "position" || background)) {
+        event.preventDefault();
+        setTool(tools[key]);
+      } else if (key === "1") {
+        event.preventDefault();
+        setViewMode("source");
+      } else if (key === "2" && currentImage) {
+        event.preventDefault();
+        setViewMode("live");
+      } else if (key === "+" || key === "=") {
+        event.preventDefault();
+        if (viewMode === "live") {
+          setLiveZoom((value) => clamp(value + 0.25, 0.5, 2.5));
+        } else {
+          setZoom((value) => clamp(value + 1, 2, 64));
+        }
+      } else if (key === "-" || key === "_") {
+        event.preventDefault();
+        if (viewMode === "live") {
+          setLiveZoom((value) => clamp(value - 0.25, 0.5, 2.5));
+        } else {
+          setZoom((value) => clamp(value - 1, 2, 64));
+        }
+      }
     }
 
     window.addEventListener("keydown", handleEditorShortcut);
     return () => window.removeEventListener("keydown", handleEditorShortcut);
   });
+
+  useEffect(() => {
+    function fitSourceZoom() {
+      if (viewMode !== "source" || !selectionRect) return;
+      const stage = stageWrapRef.current;
+      const availableWidth = Math.max(
+        120,
+        (stage?.clientWidth || window.innerWidth) - 48
+      );
+      const availableHeight = Math.max(
+        120,
+        (stage?.clientHeight || window.innerHeight) - 48
+      );
+      const fitScale = Math.floor(
+        Math.min(
+          (availableWidth * 0.6) / selectionRect.width,
+          (availableHeight * 0.6) / selectionRect.height
+        )
+      );
+      setZoom(clamp(fitScale, 2, 64));
+    }
+
+    fitSourceZoom();
+    window.addEventListener("resize", fitSourceZoom);
+    return () => window.removeEventListener("resize", fitSourceZoom);
+  }, [
+    viewMode,
+    selectedAssetId,
+    selectedSpriteName,
+    selectionRect?.width,
+    selectionRect?.height,
+  ]);
 
   function commitImage(image: DecodedSheet) {
     if (!selectedAsset) return;
@@ -876,7 +949,7 @@ export default function SkinEditor() {
 
     while (true) {
       const target = ((rect.y + y) * image.width + rect.x + x) * 4;
-      const hex = tool === "eraser" ? eraseColor : color;
+      const hex = activePaintColor.current;
       nextPixels.data[target] = parseInt(hex.slice(1, 3), 16);
       nextPixels.data[target + 1] = parseInt(hex.slice(3, 5), 16);
       nextPixels.data[target + 2] = parseInt(hex.slice(5, 7), 16);
@@ -896,9 +969,13 @@ export default function SkinEditor() {
     commitImage({ ...image, pixels: nextPixels });
   }
 
-  function onContextPaintStart(pixel: ContextPixel) {
+  function onContextPaintStart(pixel: ContextPixel, button: number) {
     const image = currentImageRef.current;
     if (!image || tool === "position") return;
+    activePaintColor.current =
+      tool === "eraser" || (tool === "pencil" && button !== 0)
+        ? eraseColor
+        : color;
     setSelectedSpriteName(pixel.name);
     setBackground(null);
     pushHistory(undoStack.current, {
@@ -937,6 +1014,8 @@ export default function SkinEditor() {
 
   function onCanvasPointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!currentImage || !selectionRect) return;
+    event.preventDefault();
+    if (tool === "position" && event.button !== 0) return;
     const point = pixelPosition(event);
     if (!point) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -953,6 +1032,11 @@ export default function SkinEditor() {
       };
       return;
     }
+
+    activePaintColor.current =
+      tool === "eraser" || (tool === "pencil" && event.button !== 0)
+        ? eraseColor
+        : color;
 
     pushHistory(undoStack.current, {
       ...currentImage,
@@ -1367,21 +1451,6 @@ export default function SkinEditor() {
                 Position
               </button>
             </div>
-            <div className="skin-editor-view-modes" aria-label="Canvas view">
-              <button
-                className={viewMode === "source" ? "is-active" : ""}
-                onClick={() => setViewMode("source")}
-              >
-                Source
-              </button>
-              <button
-                className={viewMode === "live" ? "is-active" : ""}
-                onClick={() => setViewMode("live")}
-                disabled={!currentImage}
-              >
-                Live
-              </button>
-            </div>
             <div className="skin-editor-color-tools">
               <label title="Paint color">
                 <span>Ink</span>
@@ -1405,16 +1474,28 @@ export default function SkinEditor() {
             <div className="skin-editor-zoom">
               <button
                 aria-label="Zoom out"
-                onClick={() => setZoom((value) => Math.max(1, value - 1))}
-                disabled={zoom <= 1 || viewMode !== "source"}
+                onClick={() =>
+                  viewMode === "live"
+                    ? setLiveZoom((value) => clamp(value - 0.25, 0.5, 2.5))
+                    : setZoom((value) => clamp(value - 1, 2, 64))
+                }
+                disabled={viewMode === "live" ? liveZoom <= 0.5 : zoom <= 2}
               >
                 −
               </button>
-              <span>{zoom}×</span>
+              <span>
+                {viewMode === "live"
+                  ? `${Math.round(liveZoom * 100)}%`
+                  : `${zoom}×`}
+              </span>
               <button
                 aria-label="Zoom in"
-                onClick={() => setZoom((value) => Math.min(16, value + 1))}
-                disabled={zoom >= 16 || viewMode !== "source"}
+                onClick={() =>
+                  viewMode === "live"
+                    ? setLiveZoom((value) => clamp(value + 0.25, 0.5, 2.5))
+                    : setZoom((value) => clamp(value + 1, 2, 64))
+                }
+                disabled={viewMode === "live" ? liveZoom >= 2.5 : zoom >= 64}
               >
                 +
               </button>
@@ -1439,7 +1520,7 @@ export default function SkinEditor() {
             </div>
           </div>
 
-          <div className="skin-editor-stage-wrap">
+          <div className="skin-editor-stage-wrap" ref={stageWrapRef}>
             {error && <div className="skin-editor-error">{error}</div>}
             {showContextPreview && currentImage && selectedAsset && (
               <div className="skin-editor-context-scroll">
@@ -1461,6 +1542,7 @@ export default function SkinEditor() {
                   assetKey={spriteKey(selectedAsset)}
                   highlightedSprite={contextHighlight}
                   tool={tool}
+                  zoom={liveZoom}
                   onHoverSprite={setHoveredSpriteName}
                   onPaintStart={onContextPaintStart}
                   onPaintMove={onContextPaintMove}
@@ -1492,6 +1574,7 @@ export default function SkinEditor() {
                     onPointerUp={endCanvasPointer}
                     onPointerCancel={endCanvasPointer}
                     onLostPointerCapture={endCanvasPointer}
+                    onContextMenu={(event) => event.preventDefault()}
                   />
                 </div>
               </div>
@@ -1547,6 +1630,27 @@ export default function SkinEditor() {
               ))}
             </select>
           </label>
+          <div className="skin-editor-property">
+            <span>View</span>
+            <div className="skin-editor-view-modes" aria-label="Canvas view">
+              <button
+                className={viewMode === "source" ? "is-active" : ""}
+                onClick={() => setViewMode("source")}
+              >
+                Source
+              </button>
+              <button
+                className={viewMode === "live" ? "is-active" : ""}
+                onClick={() => {
+                  setViewMode("live");
+                  if (tool === "position") setTool("pencil");
+                }}
+                disabled={!currentImage}
+              >
+                Live
+              </button>
+            </div>
+          </div>
           <div className="skin-editor-sprite-inventory">
             <div className="skin-editor-sprite-inventory-heading">
               <span>Elements</span>
