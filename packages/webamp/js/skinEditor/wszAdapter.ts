@@ -24,22 +24,29 @@ export async function importWsz(
   const assets: SkinProject["assets"] = [];
   const assetPaths = new Map<string, string>();
 
-  await Promise.all(
+  const entries = await Promise.all(
     Object.values(zip.files).map(async (file) => {
-      if (file.dir) return;
+      if (file.dir) return null;
 
       const contents = await file.async("uint8array");
-      files.set(file.name, contents);
-
-      const extension = file.name.split(".").pop()?.toLowerCase() || "";
-      const mimeType = IMAGE_MIME_TYPES[extension];
-      if (!mimeType) return;
-
-      const id = `image:${file.name}`;
-      assets.push({ id, name: file.name, mimeType, data: contents });
-      assetPaths.set(id, file.name);
+      return { file, contents };
     })
   );
+
+  for (const entry of entries) {
+    if (!entry) continue;
+
+    const { file, contents } = entry;
+    files.set(file.name, contents);
+
+    const extension = file.name.split(".").pop()?.toLowerCase() || "";
+    const mimeType = IMAGE_MIME_TYPES[extension];
+    if (!mimeType) continue;
+
+    const id = `image:${file.name}`;
+    assets.push({ id, name: file.name, mimeType, data: contents });
+    assetPaths.set(id, file.name);
+  }
 
   return { project: { name, assets }, files, assetPaths };
 }
@@ -50,7 +57,10 @@ export async function exportWsz(document: WszDocument): Promise<Uint8Array> {
 
   for (const asset of document.project.assets) {
     const path = document.assetPaths.get(asset.id);
-    if (path) files.set(path, asset.data);
+    if (!path) {
+      throw new Error(`No WSZ output path for image asset: ${asset.id}`);
+    }
+    files.set(path, asset.data);
   }
 
   for (const [path, contents] of files) {
